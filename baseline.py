@@ -46,10 +46,10 @@ device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cp
 
 
 CFG = {
-    'IMG_SIZE':240,
-    'EPOCHS':10,
+    'IMG_SIZE':380,
+    'EPOCHS':5,
     'LEARNING_RATE':3e-4,
-    'BATCH_SIZE':64,
+    'BATCH_SIZE':16,
     'SEED':41
 }
 
@@ -76,13 +76,13 @@ seed_everything(CFG['SEED']) # Seed 고정
 # In[5]:
 
 
-df = pd.read_csv('./train.csv')
+df = pd.read_csv('./row_augrow_upscale.csv')
 
 
 # In[6]:
 
 
-train, val, _, _ = train_test_split(df, df['label'], test_size=0.3, stratify=df['label'], random_state=CFG['SEED'])
+train, val, _, _ = train_test_split(df, df['label'], test_size=0.2, stratify=df['label'], random_state=CFG['SEED'])
 
 
 # ## Label-Encoding
@@ -129,6 +129,17 @@ class CustomDataset(Dataset):
 
 train_transform = A.Compose([
                             A.Resize(CFG['IMG_SIZE'],CFG['IMG_SIZE']),
+                            A.OneOf([
+                                A.HorizontalFlip(p=0.5),  # Apply horizontal flip with a probability of 0.5
+                                A.VerticalFlip(p=0.5),  # Apply vertical flip with a probability of 0.5
+                                A.RandomRotate90(p=0.5),  # Randomly rotate the image by 90 degrees
+                                A.Transpose(p=0.5),  # Transpose the image (flip horizontally and vertically)
+                            ], p=0.5),  # Apply one of the augmentations with a probability of 0.5
+                            A.OneOf([
+                                A.RandomBrightnessContrast(p=0.2),  # Randomly adjust brightness and contrast
+                                A.RandomGamma(p=0.2),  # Randomly adjust gamma
+                                A.ColorJitter(p=0.2),  # Randomly change brightness, contrast, saturation, and hue
+                            ], p=0.5),
                             A.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225), max_pixel_value=255.0, always_apply=False, p=1.0),
                             ToTensorV2()
                             ])
@@ -158,13 +169,14 @@ val_loader = DataLoader(val_dataset, batch_size=CFG['BATCH_SIZE'], shuffle=False
 class BaseModel(nn.Module):
     def __init__(self, num_classes=len(le.classes_)):
         super(BaseModel, self).__init__()
-        self.backbone = models.efficientnet_b1(pretrained=True)
+        self.backbone = models.efficientnet_b4(pretrained=True)
         self.classifier = nn.Linear(1000, num_classes)
         
     def forward(self, x):
         x = self.backbone(x)
         x = self.classifier(x)
         return x
+
 
 
 # ## Train
@@ -247,7 +259,7 @@ def validation(model, criterion, val_loader, device):
 
 model = BaseModel()
 model.eval()
-optimizer = torch.optim.AdamW(params = model.parameters(), lr = CFG["LEARNING_RATE"])
+optimizer = torch.optim.Adam(params = model.parameters(), lr = CFG["LEARNING_RATE"])
 scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', factor=0.5, patience=2, threshold_mode='abs', min_lr=1e-8, verbose=True)
 
 infer_model = train(model, optimizer, train_loader, val_loader, scheduler, device)
@@ -309,5 +321,5 @@ submit['label'] = preds
 # In[21]:
 
 
-submit.to_csv('./baseline_submit.csv', index=False)
+submit.to_csv('./submit_lrnet.csv', index=False)
 
